@@ -11,7 +11,7 @@ SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl3.cpp $(IMGUI_DIR)/backends/imgui_impl_vulkan.cpp
 OBJS = $(addprefix $(OBJ_DIR)/, $(notdir $(SOURCES:.cpp=.o)))
 
-CXXFLAGS = -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -g -Wall -Wformat
+CXXFLAGS = --std=c++23 -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -g -Wall -Wformat
 CXXFLAGS += $(shell pkg-config --cflags sdl3 vulkan)
 
 LIBS = -ldl

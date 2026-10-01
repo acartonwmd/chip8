@@ -1,19 +1,142 @@
 #include "chip8.h"
-#include <cstdlib>
 
 using namespace chip8;
 using chip8::ch8_emu;
+
+/* CHIP-8 Emulator: Core functionality */
+
+void ch8_emu::start()
+{
+    while(true) 
+    {
+        // Emulates a CPU cycle
+        cpu_cycle(this->memory[this->pc], this->memory[this->pc + 1]);
+    }
+}
+
+void ch8_emu::print_instrs(int size)
+{
+    std::cout << "[DEBUG]: instruction memory dump" << std::endl;
+
+    for(int i = instrbuf_addr; i < instrbuf_addr + size; i++)
+    {
+        std::cout << std::format("{:#04x}", this->memory[i]) << std::endl;
+    }
+}
+
+/**
+ * @brief Constructor for the main emulator components
+ * @param rompath filepath for the desired .ch8 program
+ * 
+ * If while reading the program an error occurs, this will complete exit the program
+ */
+ch8_emu::ch8_emu(fs::path rompath) 
+{
+    try 
+    {
+        std::ifstream data{rompath, std::ios_base::binary | std::ios_base::ate};
+        std::streamsize size = data.tellg();
+        data.seekg(0, std::ios_base::beg);
+        data.read(this->memory.data() + instrbuf_addr, size);
+        this->print_instrs(size);
+    } catch(const fs::filesystem_error& e) 
+    {
+        std::cerr << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    // P
+    u8 font[80] = 
+    {
+        0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+        0x20, 0x60, 0x20, 0x20, 0x70, // 1
+        0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+        0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+        0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+        0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+        0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+        0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+        0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+        0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+        0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+        0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+        0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+        0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+        0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+        0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+    };
+
+    // I am going to place the font at 0x00 so I can then place the fmap below the instrs
+    memmove(this->memory.data(), font, 80);
+
+    // Register the function map
+    this->register_fmap();
+}
+
+
+void ch8_emu::register_fmap() 
+{
+    this->funcs[0x00] = &ch8_emu::x00;
+    this->funcs[0x01] = &ch8_emu::x01;
+    this->funcs[0x02] = &ch8_emu::x02;
+    this->funcs[0x03] = &ch8_emu::x03;
+    this->funcs[0x04] = &ch8_emu::x04;
+    this->funcs[0x05] = &ch8_emu::x05;
+    this->funcs[0x06] = &ch8_emu::x06;
+    this->funcs[0x07] = &ch8_emu::x07;
+    this->funcs[0x08] = &ch8_emu::x08;
+    this->funcs[0x09] = &ch8_emu::x09;
+    this->funcs[0x0A] = &ch8_emu::x0A;
+    this->funcs[0x0B] = &ch8_emu::x0B;
+    this->funcs[0x0C] = &ch8_emu::x0C;
+    this->funcs[0x0D] = &ch8_emu::x0D;
+    this->funcs[0x0E] = &ch8_emu::x0E;
+    this->funcs[0x0F] = &ch8_emu::x0F;
+}
+
+void ch8_emu::cpu_cycle(u8 first, u8 second) 
+{
+    //Fetch
+    this->pc += 2;
+    u16 fetched = ((((u16)first) << 8) & 0xff00) | (u16)second;
+
+    // Decode
+    ch8_emu::ch8_instr decoded;
+    decoded.opcode = (u8)((fetched >> 12) & opcode_mask);
+    decoded.vx = (u8)((fetched >> 8) & opcode_mask);
+    decoded.vy = (u8)((fetched >> 4) & opcode_mask);
+    decoded.n = (u8)(fetched & opcode_mask);
+    decoded.nn = (u8)(fetched & nn_mask);
+    decoded.nnn = (fetched & nnn_mask);
+
+    // Command dispatch
+    auto itr = this->funcs.find(decoded.opcode);
+    if (itr != this->funcs.end()) 
+    {
+        std::invoke(itr->second, this, &decoded);
+    }
+
+    std::cerr << "Command unknown: " << decoded.opcode << std::endl;
+    std::exit(EXIT_FAILURE);
+}
+
+/* Chipset functions */
 
 /**
  * @brief execute the 0x00E0 and 0x00EE instructions
  * @param decoded deconstructed CHIP-8 instruction
  * 
- * 
- .
+ *
  */
 void ch8_emu::x00(const ch8_instr* decoded) 
 {
-    
+    if (decoded->nn == 0xE0) // Clear the display
+    {
+        this->framebuffer.fill(0);
+    } else if (decoded->nn == 0xEE) // Return from subroutine
+    {
+        this->pc = this->stack->pop_addr();
+    }
 }
 
 void ch8_emu::x01(const ch8_instr* decoded)
@@ -91,279 +214,24 @@ void ch8_emu::x0F(const ch8_instr* decoded)
 
 }
 
-ch8_emu::ch8_emu(fs::path rompath) 
+/* CHIP-8 Stack and Stack Frame functionality */
+
+ch8_stack::ch8_stack()
 {
-    try 
-    {
-        std::ifstream data{rompath, std::ios_base::binary | std::ios_base::ate};
-        std::streamsize size = data.tellg();
-        data.seekg(0, std::ios_base::beg);
-        data.read(this->memory + instrbuf_addr, size);
-    } catch(const fs::filesystem_error& e) 
-    {
-        std::cerr << e.what() << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    u8 font[80] = 
-    {
-        0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-        0x20, 0x60, 0x20, 0x20, 0x70, // 1
-        0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-        0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-        0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-        0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-        0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-        0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-        0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-        0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-        0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-        0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-        0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-        0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-        0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-        0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-    };
-
-    memmove(this->memory +  fontset_addr, font, 80);
-
-    // Register the function map
-
+    this->head = nullptr;
 }
 
-void ch8_emu::start()
+void ch8_stack::push_addr(u16 addr)
 {
-    while(true) 
-    {
-        // Emulates a CPU cycle
-        cpu_cycle(this->memory[this->pc], this->memory[this->pc + 1]);
-    }
+    ch8_stack::ch8_frame temp;
+    temp.ret_addr = addr;
+    temp.next = this->head;
+    this->head = &temp;
 }
 
-
-void ch8_emu::cpu_cycle(u8 first, u8 second) 
+u16 ch8_stack::pop_addr()
 {
-    //Fetch
-    this->pc += 2;
-    u16 fetched = ((((u16)first) << 8) & 0xff00) | (u16)second;
-
-    // Decode
-    ch8_emu::ch8_instr decoded;
-    decoded.opcode = (u8)((fetched >> 12) & opcode_mask);
-    decoded.vx = (u8)((fetched >> 8) & opcode_mask);
-    decoded.vy = (u8)((fetched >> 4) & opcode_mask);
-    decoded.n = (u8)(fetched & opcode_mask);
-    decoded.nn = (u8)(fetched & nn_mask);
-    decoded.nnn = (fetched & nnn_mask);
-
-    // Execute
-    auto itr = this->funcs.find(decoded.opcode);
-    if (itr == this->funcs.end()) 
-    {
-        std::cerr << "Command unknown: " << decoded.opcode << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    itr->second(&decoded);
+    ch8_stack::ch8_frame temp = *(this->head);
+    this->head = this->head->next;
+    return temp.ret_addr;
 }
-
-
-/* Old opcode functions */
-// switch (decoded_instr.opcode) {
-//         case 0x00: {
-//             if (decoded_instr.nn == 0xE0) {
-//                 // 00E0: Clear the screen 
-//                 for (int i = 0; i < 64; i++) {
-//                     for (int j = 0; 32; j++) {
-//                         this->framebuffer[i + j] = 0;
-//                     }
-//                 }
-
-//             } else if (decoded_instr.nn == 0xEE) {
-//                 // 00EE: Subroutine return, simply pop the top register from the stack
-//                 this->pc = this->stack->pop_addr();
-
-//             } else {
-//                 fprintf(stderr, "00NN instr error: unknown instruction found - %x\n", decoded_instr.nn);
-//                 exit(EXIT_FAILURE);
-//             }
-
-//             break;
-//         }
-
-//         case 0x01: {
-//             if (!(decoded_instr.nnn < instrbuf_addr)) {
-//                 this->pc = decoded_instr.nnn;
-//             } else {
-//                 fprintf(stderr, "1NNN memory error: address %x less than 0x200, the lowest allowed address\n", decoded_instr.nnn);
-//                 exit(EXIT_FAILURE);
-//             }
-
-//             break;
-//         }
-
-//         case 0x02: {
-//             if (!(decoded_instr.nnn < instrbuf_addr)) {
-//                 this->stack->push_addr(this->pc);
-//                 this->pc = decoded_instr.nnn;
-//                 break;
-//             } else {
-//                 fprintf(stderr, "2NNN memory error: address %x less than 0x200, the lowest allowed address\n", decoded_instr.nnn);
-//                 exit(EXIT_FAILURE);
-//             }
-//         }
-
-//         case 0x03: {
-//             // 3XNN: if VX == NN, skip 1 instr (2 bytes)
-//             if (this->registers[decoded_instr.vx] == decoded_instr.nn) {
-//                 this->pc += 2;
-//             }
-
-//             break;
-//         }
-
-//         case 0x04: {
-//             // 4XNN: skip 1 instr if VX != NN
-//             if (this->registers[decoded_instr.vx] != decoded_instr.nn) {
-//                 this->pc += 2;
-//             }
-
-//             break;
-//         }
-
-//         case 0x05: {
-//             // 5XY0: skip 1 instr if REGS[VX] == REGS[VY]
-//             if (this->registers[decoded_instr.vx] == this->registers[decoded_instr.vy]) {
-//                 this->pc += 2;
-//             }
-
-//             break;
-//         }
-
-//         case 0x06: {
-//             // 6XNN: set VX = NN
-//             this->registers[decoded_instr.vx] = decoded_instr.nn;
-//             break;
-//         }
-
-//         case 0x07: {
-//             // 7XNN: add NN to the value of VX
-//             // REGS[VX] += NN
-//             this->registers[decoded_instr.vx] += decoded_instr.nn;
-//             break;
-//         }
-
-//         case 0x08: {
-//             switch (decoded_instr.n) {
-//                 case 0: {
-//                     // 8XY0: VX = VY
-//                     this->registers[decoded_instr.vx] = this->registers[decoded_instr.vy];
-//                     break;
-//                 }
-
-//                 case 1: {
-//                     // 8XY1: VX = VX | VY (bitwise OR)
-//                     this->registers[decoded_instr.vx] |= this->registers[decoded_instr.vy];
-//                     break;
-//                 }
-
-//                 case 2: {
-//                     // 8XY2: VX = VX & VY (bitwise AND)
-//                     this->registers[decoded_instr.vx] &= this->registers[decoded_instr.vy];
-//                     break; 
-//                 }
-
-//                 case 3: {
-//                     // 8XY3: VX = VX XOR VY (bitwise XOR)
-//                     this->registers[decoded_instr.vx] ^= this->registers[decoded_instr.vy];
-//                     break;
-//                 }
-
-//                 case 4: {
-//                     // 8XY4: VX = VX + VY
-//                     uint8_t vx_temp = this->registers[decoded_instr.vx];
-//                     uint8_t vy_temp = this->registers[decoded_instr.vy];
-
-//                     if (vx_temp > UINT8_MAX - vy_temp) {
-//                         this->registers[0x0F] = 0x01;
-//                     } else {
-//                         this->registers[0x0F] = 0x00;
-//                     }
-
-//                     this->registers[decoded_instr.vx] += vy_temp;
-//                     break;
-//                 }
-
-//                 case 5: {
-//                     // 8XY5: VX = VX - VY
-
-//                 }
-
-//                 default: {
-//                     fprintf(stderr, "8XYN error: not a recognized function opcode for N\n");
-//                     exit(EXIT_FAILURE);
-//                 }
-//             }
-//             break;
-//         }
-
-//         case 0x09: {
-//             // 9XY0: skip 1 instr if REGS[VX] != REGS[VY]
-//             if (this->registers[decoded_instr.vx] != this->registers[decoded_instr.vy]) {
-//                 this->pc += 2;
-//             }
-
-
-//             break;
-//         }
-
-//         case 0x0A: {
-//             // ANNN: Set index reg to NNN
-//             if (!(decoded_instr.nnn < instrbuf_addr)) {
-//                 this->index = decoded_instr.nnn;
-//                 break;
-//             } else {
-//                 fprintf(stderr, "ANNN memory error: address %x less than 0x200, the lowest allowed address\n", decoded_instr.nnn);
-//                 exit(EXIT_FAILURE);
-//             }
-//         }
-
-//         case 0x0B: {
-//             // BXNN: jump to XNN + REGS[VX]
-//             this->pc = decoded_instr.nnn + this->registers[decoded_instr.vx];
-//             break;
-//         }
-
-//         case 0x0C: {
-//             srand(time(NULL));
-//             this->registers[decoded_instr.vx] = rand() & decoded_instr.nn;
-//             break;
-//         }
-
-//         case 0x0D: {
-//             break;
-//         }
-
-//         case 0x0E: {
-//             break;
-//         }
-        
-//         case 0x0F: {
-//             switch (decoded_instr.nn) {
-//                 case 0x55: {
-//                     // FX55: set each byte of index + i to REGS[i] until i == X
-//                     u16 temp_index = this->index;
-//                     for (u8 i = 0; i <= decoded_instr.vx; i++) {
-//                         this->memory[temp_index + i] = this->registers[i];
-//                     }
-
-//                     break;
-//                 }
-//             }
-//         }
-
-//         default: {
-//             fprintf(stderr, "Unknown instruction identified\n");
-//             exit(EXIT_FAILURE);
-//         }
-//     }

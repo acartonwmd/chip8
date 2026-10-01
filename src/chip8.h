@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../imgui/imgui.h"
 #include <string>
 #include <cstdint>
 #include <cstdlib>
@@ -12,21 +11,20 @@
 #include <cstring>
 #include <functional>
 #include <unordered_map>
+#include <array>
 
 namespace chip8 
 {
     typedef std::uint8_t u8;
     typedef std::uint16_t u16;
-    typedef std::uint32_t u32;
 
     const u16 instrbuf_addr = 0x0200;
-    const u8 register_count = 16;
-    const u16 memory_capacity = 4096;
+    const u8 regnum = 16;
+    const u16 memcap = 4096;
     const u16 opcode_mask = 0x000F;
     const u16 nn_mask = 0x00FF;
     const u16 nnn_mask = 0x0FFF;
-    const u8 fontset_addr = 0x00;
-    const u16 display_resolution = 64 * 32;
+    constexpr u16 resolution = 64 * 32;
 
     namespace fs = std::filesystem;
 
@@ -60,13 +58,13 @@ namespace chip8
                 u8 opcode;
             } ch8_instr;
 
-            using execute_opcode = std::function<void(const ch8_instr*)>;
-            using fmap = std::unordered_map<u8, execute_opcode>;
+            using fptrs = void(ch8_emu::*)(const ch8_instr*);
+            using fmap = std::unordered_map<u8, fptrs>;
 
-            char memory[memory_capacity] = {};
-            u8 framebuffer[display_resolution] = {};
-            fmap funcs;
-            u8 registers[register_count] {};
+            std::array<char, memcap> memory = {};
+            std::array<u8, resolution> framebuffer = {};
+            fmap funcs = {};
+            std::array<u8, regnum> registers = {};
             ch8_stack* stack;
             u16 pc = instrbuf_addr;
             u16 index = 0;
@@ -90,12 +88,15 @@ namespace chip8
             void x0D(const ch8_instr* decoded);
             void x0E(const ch8_instr* decoded);
             void x0F(const ch8_instr* decoded);
-            
+
+            // Utility and initialization
             void cpu_cycle(u8 first, u8 second);
             void register_fmap();
 
         public:
+            // Main emulator functions
             ch8_emu(fs::path rompath);
             void start();
+            void print_instrs(int size);
     };
 };

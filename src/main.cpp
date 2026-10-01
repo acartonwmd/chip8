@@ -11,5 +11,5 @@ int main(int argc, char *argv[])
     }
 
     ch8_emu emulator(argv[1]);
-    emulator.start();
+    //emulator.start();
 }
