@@ -1,26 +1,22 @@
 #include "chip8.h"
+#include <cstdint>
+#include <cstdlib>
 
 using namespace chip8;
 using chip8::ch8_emu;
 
 /* CHIP-8 Emulator: Core functionality */
 
+/**
+ * @brief initial entry point after emulator creation
+ * 
+ */
 void ch8_emu::start()
 {
     while(true) 
     {
         // Emulates a CPU cycle
         cpu_cycle(this->memory[this->pc], this->memory[this->pc + 1]);
-    }
-}
-
-void ch8_emu::print_instrs(int size)
-{
-    std::cout << "[DEBUG]: instruction memory dump" << std::endl;
-
-    for(int i = instrbuf_addr; i < instrbuf_addr + size; i++)
-    {
-        std::cout << std::format("{:#04x}", this->memory[i]) << std::endl;
     }
 }
 
@@ -38,7 +34,6 @@ ch8_emu::ch8_emu(fs::path rompath)
         std::streamsize size = data.tellg();
         data.seekg(0, std::ios_base::beg);
         data.read(this->memory.data() + instrbuf_addr, size);
-        this->print_instrs(size);
     } catch(const fs::filesystem_error& e) 
     {
         std::cerr << e.what() << std::endl;
@@ -94,6 +89,12 @@ void ch8_emu::register_fmap()
     this->funcs[0x0F] = &ch8_emu::x0F;
 }
 
+/**
+ * @brief 
+ * 
+ * @param first 
+ * @param second 
+ */
 void ch8_emu::cpu_cycle(u8 first, u8 second) 
 {
     //Fetch
@@ -126,77 +127,229 @@ void ch8_emu::cpu_cycle(u8 first, u8 second)
  * @brief execute the 0x00E0 and 0x00EE instructions
  * @param decoded deconstructed CHIP-8 instruction
  * 
- *
  */
 void ch8_emu::x00(const ch8_instr* decoded) 
 {
-    if (decoded->nn == 0xE0) // Clear the display
+    if (decoded->nn == 0xE0)
     {
         this->framebuffer.fill(0);
-    } else if (decoded->nn == 0xEE) // Return from subroutine
+    } else if (decoded->nn == 0xEE)
     {
         this->pc = this->stack->pop_addr();
     }
 }
 
-void ch8_emu::x01(const ch8_instr* decoded)
+/**
+ * @brief 1NNN: unconditional jump to memory[NNN] (set pc to NNN)
+ * 
+ * @param decoded deconstructed hex instruction
+ */
+void ch8_emu::x01(const ch8_instr* decoded) 
 {
+    if (decoded->nnn > memcap || decoded->nnn < instrbuf_addr)
+    {
+        std::cout << "ERROR: " << std::format("out of bounds address - {:#5x}", decoded->nnn) << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
+    this->pc = decoded->nnn;
 }
 
+/**
+ * @brief 2NNN: push current PC to stack, call subroutine at memory[NNN]
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x02(const ch8_instr* decoded)
 {
+    if (decoded->nnn > memcap || decoded->nnn < instrbuf_addr)
+    {
+        std::cout << "ERROR: " << std::format("out of bounds address - {:#5x}", decoded->nnn) << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
+    this->stack->push_addr(this->pc);
+    this->pc = decoded->nnn;
 }
 
+/**
+ * @brief 3XNN: conditional skip if regs[VX] == NN, skip 1 instruction (PC += 2)
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x03(const ch8_instr* decoded)
 {
-
+    if (this->registers[decoded->vx] == decoded->nn) 
+    {
+        this->pc += 2;
+    } // Otherwise, do nothing
 }
 
+/**
+ * @brief 4XNN: conditional skip if regs[VX] != NN, skip 1 instruction (PC += 2)
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x04(const ch8_instr* decoded)
 {
-
+    if (this->registers[decoded->vx] != decoded->nn) 
+    {
+        this->pc += 2;
+    } // Otherwise, do nothing
 }
 
+/**
+ * @brief 5XY0: if regs[VX] == regs[VY], PC += 2
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x05(const ch8_instr* decoded)
 {
-
+    if(this->registers[decoded->vx] == this->registers[decoded->vy])
+    {
+        this->pc += 2;
+    } // Otherwise, do nothing
 }
 
+/**
+ * @brief 6XNN: regs[VX] = NN
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x06(const ch8_instr* decoded)
 {
-
+    this->registers[decoded->vx] = decoded->nn;
 }
 
+/**
+ * @brief 7XNN: regs[VX] += NN
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x07(const ch8_instr* decoded)
 {
-
+    this->registers[decoded->vx] += decoded->nn;
 }
 
+/**
+ * @brief 8XYN: logical and bitwise operations
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x08(const ch8_instr* decoded)
 {
+    switch(decoded->n)
+    {
+        case 0x00:
+        {
+            this->registers[decoded->vx] = this->registers[decoded->vy];
+            break;
+        }
 
+        case 0x01:
+        {
+            this->registers[decoded->vx] |= this->registers[decoded->vy];
+            break;
+        }
+
+        case 0x02:
+        {
+            this->registers[decoded->vx] &= this->registers[decoded->vy];
+            break;
+        }
+
+        case 0x03:
+        {
+            this->registers[decoded->vx] ^= this->registers[decoded->vy];
+            break;
+        }
+
+        case 0x04:
+        {
+            if(this->registers[decoded->vx] > UINT8_MAX - this->registers[decoded->vy])
+            {
+                this->registers[0x0F] = 0x01;
+            }
+
+            this->registers[decoded->vx] += this->registers[decoded->vy];
+
+            break;
+        }
+
+        case 0x05:
+        {
+            this->registers[decoded->vx] -= this->registers[decoded->vy];
+            break;
+        }
+
+        case  0x06:
+        {
+            this->registers[decoded->vx] = this->registers[decoded->vy];
+            this->registers[0x0F] = this->registers[decoded->vx] % 2;
+            this->registers[decoded->vx] = this->registers[decoded->vx] >> 1;
+            break;
+        }
+
+        case 0x07:
+        {
+            this->registers[decoded->vx] = this->registers[decoded->vy] - this->registers[decoded->vx];
+            break;
+        }
+
+        case 0x0E:
+        {
+            this->registers[decoded->vx] = this->registers[decoded->vy];
+            this->registers[0x0F] = (this->registers[decoded->vx] & 0x80) >> 7;
+            this->registers[decoded->vx] = this->registers[decoded->vx] << 1;
+            break;
+        }
+    }
 }
 
+/**
+ * @brief 9XY0: if regs[VX] != regs[VY], PC += 2
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x09(const ch8_instr* decoded)
 {
-
+    if(this->registers[decoded->vx] != this->registers[decoded->vy])
+    {
+        this->pc += 2;
+    }
 }
 
+/**
+ * @brief ANNN: index = NNN
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x0A(const ch8_instr* decoded)
 {
-
+    this->index = decoded->nnn;
 }
 
+/**
+ * @brief BXNN: PC += XNN + regs[VX]
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x0B(const ch8_instr* decoded)
 {
-
+    this->pc += decoded->nnn + this->registers[decoded->vx];
 }
 
+/**
+ * @brief CXNN: regs[VX] = rand() & NN
+ * 
+ * @param decoded deconstructed hex instruction
+ */
 void ch8_emu::x0C(const ch8_instr* decoded)
 {
+    std::srand(std::time({}));
+    const int random = std::rand();
 
+    this->registers[decoded->vx] = random & decoded->nn;
 }
 
 void ch8_emu::x0D(const ch8_instr* decoded)
@@ -206,7 +359,7 @@ void ch8_emu::x0D(const ch8_instr* decoded)
 
 void ch8_emu::x0E(const ch8_instr* decoded)
 {
-
+    
 }
 
 void ch8_emu::x0F(const ch8_instr* decoded)

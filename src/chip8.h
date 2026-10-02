@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
@@ -12,6 +11,7 @@
 #include <functional>
 #include <unordered_map>
 #include <array>
+#include <format>
 
 namespace chip8 
 {
@@ -97,6 +97,5 @@ namespace chip8
             // Main emulator functions
             ch8_emu(fs::path rompath);
             void start();
-            void print_instrs(int size);
     };
 };
